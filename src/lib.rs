@@ -1,5 +1,6 @@
 use core::fmt;
-use std::{error::Error, fmt::format};
+use std::{error::Error, fmt::format, path::PathBuf};
+use clap::{builder::Str, Parser, Subcommand};
 
 use rppal::spi::Spi;
 
@@ -8,6 +9,81 @@ pub struct LEDRing<'a>{
     brightness:f32,
     current_rgb_values: Vec<u8>,
     bus: &'a mut Spi,
+}
+
+#[derive(Parser, Debug)]
+#[command(name = "LEDRingController", 
+          version="0.4", 
+          about = "Controlls an RGB LED Ring", 
+          long_about = None)]
+pub struct LEDRingCliArgs{
+    ///Number of leds
+    #[arg(short, long)]
+    pub leds: u8,
+
+    ///Brightness of the LEDs ranging from 0-1; optional
+    #[arg(short, long)]
+    pub brightness: Option<f32>,
+
+    ///Optional path to a config.json file
+    #[arg(short, long, value_name = "Path")]
+    pub config: Option<PathBuf>,
+
+    #[command(subcommand)]
+    /// Subcommand to control LEDs
+    pub command: LEDRingCommands
+}
+
+#[derive(Subcommand, Debug)]
+pub enum LEDRingCommands{
+    #[command(about = "Setting color for single LED at index to RGB values.")]
+    SetSingleRGB{
+        /// LED index, 0 based
+        index:u8,
+        /// red value, 0-255; optional
+        #[arg(short, long)]
+        r: u8,
+        /// green value, 0-255; optional
+        #[arg(short, long)]
+        g: u8,
+        /// blue value, 0-255; optional
+        #[arg(short, long)]
+        b: u8,
+    },
+
+    #[command(about = "Setting color for single LED at index to hex value.")]
+    SetSingleHEX{
+        /// LED index, 0 based
+        index:u8,
+        /// HEX value
+        #[arg(short, long)]
+        hex: String
+    },
+
+    #[command(about = "Setting color for multiple LEDs for indices to RGB values.")]
+    SetMultipleRGB{
+        /// LED index, 0 based
+        #[arg(short, long, num_args = 0..=8, value_delimiter = ' ')]
+        indices:Vec<u8>,
+        /// red value, 0-255; optional
+        #[arg(short, long)]
+        r: u8,
+        /// green value, 0-255; optional
+        #[arg(short, long)]
+        g: u8,
+        /// blue value, 0-255; optional
+        #[arg(short, long)]
+        b: u8
+    },
+    #[command(about = "Setting color for multiple LEDs for indicies to hex value.")]
+    SetMultipleHEX{
+        /// LED index, 0 based
+        #[arg(short, long, num_args = 0..=8, value_delimiter = ' ')]
+        indices:Vec<u8>,
+        /// HEX value
+        #[arg(short, long)]
+        hex: String
+    },
 }
 
 #[derive(Debug)]
@@ -41,8 +117,19 @@ impl Error for LEDRingError {}
 
 impl<'a> LEDRing<'a> {
     
-    pub fn new(bus: &'a mut Spi, num_led:u8, brightness:f32) -> Self{
-        return LEDRing{ num_leds: num_led, brightness, current_rgb_values: vec![0; 3*num_led as usize], bus};
+    pub fn new(bus: &'a mut Spi, num_led:u8, brightness:Option<f32>) -> Self{
+        if let Some(value) = brightness{
+            return LEDRing{ num_leds: num_led, 
+                            brightness: value, 
+                            current_rgb_values: vec![0; 3*num_led as usize], 
+                            bus};
+   
+        }else{
+            return LEDRing{ num_leds: num_led, 
+                            brightness: 1.0, 
+                            current_rgb_values: vec![0; 3*num_led as usize], 
+                            bus};
+        }
     }
 
     pub fn show(&mut self) -> Result<(), LEDRingError>{
@@ -96,7 +183,7 @@ impl<'a> LEDRing<'a> {
         }
     }
 
-    pub fn set_led_values_hex(&mut self, led_idx:u8, hex_value: u32) -> Result<(), LEDRingError>{
+    pub fn set_led_values_hex(&mut self, led_idx:u8, hex_value: &u32) -> Result<(), LEDRingError>{
 
         let rgb = convert_hex_to_rgb(hex_value)?;
 
@@ -128,8 +215,8 @@ impl<'a> LEDRing<'a> {
 
 }
 
-fn convert_hex_to_rgb(hex_value: u32) -> Result<Vec<u8>, LEDRingError>{
-    if(hex_value >= 0 && hex_value <= 0xFFFFFF){
+fn convert_hex_to_rgb(hex_value: &u32) -> Result<Vec<u8>, LEDRingError>{
+    if(*hex_value >= 0 && *hex_value <= 0xFFFFFF){
         let red:u8 = ((hex_value >> 16) & 0xFF).try_into().unwrap();
         let green:u8 = ((hex_value >> 8) & 0xFF).try_into().unwrap();
         let blue:u8 = (hex_value & 0xFF).try_into().unwrap();
@@ -150,6 +237,18 @@ fn convert_rgb_to_grb(rgb:Vec<u8>) -> Result<Vec<u8>, LEDRingError>{
     Ok(grb)
 }
 
+pub fn convert_string_to_hex(hex_string:String) -> Result<u32, LEDRingError>{
+    if(!hex_string.starts_with("#")){
+        return Err(LEDRingError::ParseError(String::from("HEX values must start with a #")))
+    }else{
+        let hex_slice = &hex_string[1..];
+        match u32::from_str_radix(hex_slice, 16){
+            Ok(value) => Ok(value),
+            Err(_) => Err(LEDRingError::ParseError(String::from("Error while parsing the HEX value.")))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests{
     use rppal::spi::Spi;
@@ -158,7 +257,7 @@ mod tests{
     #[test]
     fn test_hex_conversion() -> Result<(), String>{
         let hex = 0x112233;
-        let rgb = convert_hex_to_rgb(hex)?;
+        let rgb = convert_hex_to_rgb(&hex)?;
 
         if(rgb[0] == 17 && rgb[1] == 34 && rgb[2] == 51){
             Ok(())
@@ -170,7 +269,7 @@ mod tests{
     #[test]
     fn test_hex_to_grb() -> Result<(), String>{
         let hex = 0x112233;
-        let rgb = convert_hex_to_rgb(hex)?;
+        let rgb = convert_hex_to_rgb(&hex)?;
         if(rgb[0] != 17 && rgb[1] != 34 && rgb[2] != 51){
             return Err(format!("RGB values incorrect: R:{}, G:{}, B:{}", rgb[0], rgb[1], rgb[2]));
         }
