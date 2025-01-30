@@ -36,6 +36,8 @@ fn main() -> Result<(), LEDRingError>{
     
     // Ok(())
 
+    println!("HELLOOOOOOOO");
+
     let args = LEDRingCliArgs::parse();
     let num_led = args.leds;
     if let Some(config) = args.config{
@@ -72,7 +74,7 @@ fn set_single_rgb(red: u8,
 fn set_single_hex(hex: String, index:u8, controller: &mut LEDRing) -> Result<(), LEDRingError>{
     match convert_string_to_hex(hex) {
         Ok(value) => controller.set_led_values_hex(index, &value),
-        Err(e) => return Err(e) 
+        Err(e) => Err(e) 
     }?;
     controller.show()
 }
